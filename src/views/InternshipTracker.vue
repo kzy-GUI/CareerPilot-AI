@@ -2,7 +2,7 @@
   <div class="tracker-container">
     <h1 class="page-title">岗位投递追踪板</h1>
 
-    <!-- 输入区域 -->
+    <!-- 输入区域（原有功能不变） -->
     <div class="input-group">
       <input
         v-model="companyInput"
@@ -19,7 +19,7 @@
       <input
         v-model="statusInput"
         type="text"
-        placeholder="当前状态"
+        placeholder="当前状态（如：已投递/面试中/已录用）"
         class="tracker-input"
       />
       <button class="add-btn" @click="addRecord">添加投递记录</button>
@@ -27,28 +27,32 @@
 
     <!-- 记录卡片列表 -->
     <div class="records-list">
-      <!--
-        v-for 指令会遍历 records 数组中的每一项。
-        每遍历到一个元素，Vue 会以当前元素为模板数据，在页面上渲染出一个卡片。
-        :key 用来给每个渲染出来的节点一个唯一标识，帮助 Vue 高效地更新列表。
-      -->
       <div
         v-for="(record, index) in records"
         :key="index"
-        class="record-card"
+        :class="['record-card', getStatusClass(record.status)]"
       >
-        <div class="card-field">
-          <span class="card-label">公司：</span>
-          <span class="card-value">{{ record.company }}</span>
+        <!-- 信息区域 -->
+        <div class="card-info">
+          <div class="card-field">
+            <span class="card-label">公司：</span>
+            <span class="card-value">{{ record.company }}</span>
+          </div>
+          <div class="card-field">
+            <span class="card-label">岗位：</span>
+            <span class="card-value">{{ record.job }}</span>
+          </div>
+          <div class="card-field">
+            <span class="card-label">状态：</span>
+            <!-- 用动态样式突出状态，同时保留原有显示 -->
+            <span class="card-status">{{ record.status }}</span>
+          </div>
         </div>
-        <div class="card-field">
-          <span class="card-label">岗位：</span>
-          <span class="card-value">{{ record.job }}</span>
-        </div>
-        <div class="card-field">
-          <span class="card-label">状态：</span>
-          <span class="card-status">{{ record.status }}</span>
-        </div>
+
+        <!-- 删除按钮：点击时把当前记录的索引传给删除函数 -->
+        <button class="delete-btn" @click="deleteRecord(index)">
+          删除
+        </button>
       </div>
 
       <!-- 没有记录时的空状态提示 -->
@@ -62,47 +66,36 @@
 <script setup>
 import { ref } from 'vue'
 
-// --- 定义响应式数据 ---
-
-// 输入框绑定的值
+// --- 响应式数据（原有部分） ---
 const companyInput = ref('')
 const jobInput = ref('')
 const statusInput = ref('')
 
-/*
+/**
  * records 为什么用数组？
- *
- * 投递记录是有顺序的（按照添加时间先后排列），且数量会动态增长。
- * 用数组可以方便地：
- * 1. 按索引访问每一条记录；
- * 2. 用 push() 从尾部添加新记录，保持时间顺序；
- * 3. 配合 v-for 指令，一次性把数组里的所有数据渲染成页面卡片。
- *
- * 如果只用单独的字符串或对象，无法存放多条记录，也就不方便展示列表。
+ * 投递记录按添加时间顺序排列，数量会动态增长。
+ * 数组能方便地：
+ * 1. 按索引访问每一条；
+ * 2. 用 push() 尾部追加，保持时间序；
+ * 3. 配合 v-for 批量渲染成卡片。
  */
 const records = ref([])
 
-// --- 添加记录的方法 ---
+// --- 添加记录（完全保留原有逻辑） ---
 const addRecord = () => {
-  // 去空格后再判断，防止用户只输入空格
   const company = companyInput.value.trim()
   const job = jobInput.value.trim()
   const status = statusInput.value.trim()
 
-  // 如果任意一项为空，弹窗提示并停止执行
   if (!company || !job || !status) {
     alert('请填写完整的公司名称、岗位名称和当前状态！')
     return
   }
 
-  /*
+  /**
    * 每条记录为什么用对象？
-   *
-   * 一条投递记录包含多个相关的信息：公司名、岗位名、状态。
-   * 用对象可以把这些属性打包在一起，逻辑清晰，访问方便。
-   * 比如 record.company、record.job、record.status 就能直接拿到对应字段。
-   *
-   * 如果把这些信息拆成三个独立的数组，维护起来会非常麻烦，而且难以一一对应。
+   * 一条记录包含公司、岗位、状态等多个关联属性，
+   * 用对象可以清晰地打包在一起，访问时直接点属性名，远比维护多个分离数组方便。
    */
   records.value.push({
     company,
@@ -110,15 +103,43 @@ const addRecord = () => {
     status
   })
 
-  // 添加成功后清空输入框，提升体验
+  // 清空输入框
   companyInput.value = ''
   jobInput.value = ''
   statusInput.value = ''
 }
+
+// --- 删除记录 ---
+/**
+ * @param {number} index - 要从数组中删除的元素的索引
+ *
+ * splice 的作用：
+ * `records.value.splice(index, 1)` 会从 records 数组的第 index 位开始，
+ * 删除 1 个元素，并自动触发 Vue 的响应式更新，从界面上移除对应的卡片。
+ */
+const deleteRecord = (index) => {
+  records.value.splice(index, 1)
+}
+
+// --- 根据状态返回不同的 CSS 类名 ---
+/**
+ * 动态 class 绑定的原理：
+ * 我们在模板里使用 `:class="['record-card', getStatusClass(record.status)]"`，
+ * Vue 会实时调用 getStatusClass 函数，根据当前记录的状态字符串返回对应的类名。
+ * 这样当每条记录的状态不同时，卡片就会自动应用不同的背景色和左边框色。
+ */
+const getStatusClass = (status) => {
+  // 为了匹配更稳健，可以忽略前后空格
+  const s = status.trim()
+  if (s === '已投递') return 'status-pending'
+  if (s === '面试中') return 'status-interview'
+  if (s === '已录用') return 'status-offer'
+  // 其他状态默认无特殊背景
+  return ''
+}
 </script>
 
 <style scoped>
-/* 整体容器，与 ResumeOptimizer 风格统一：简洁、现代、居中 */
 .tracker-container {
   max-width: 800px;
   margin: 40px auto;
@@ -175,7 +196,6 @@ const addRecord = () => {
   border-radius: 10px;
   cursor: pointer;
   transition: background 0.2s, transform 0.1s;
-  letter-spacing: 0.3px;
 }
 
 .add-btn:hover {
@@ -193,20 +213,33 @@ const addRecord = () => {
   gap: 14px;
 }
 
+/*
+ * 基础卡片样式：去掉固定的左边框颜色，
+ * 改用左侧边框宽度和圆角，颜色由状态类控制
+ */
 .record-card {
-  background: #f8fafc;
-  border-left: 4px solid #3b82f6;
-  border-radius: 12px;
-  padding: 16px 20px;
   display: flex;
-  flex-wrap: wrap;
-  gap: 24px;
-  transition: box-shadow 0.2s, transform 0.1s;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 16px 20px;
+  border-left: 6px solid transparent; /* 默认透明，具体颜色由状态类设置 */
+  border-radius: 12px;
+  background: #f8fafc; /* 无状态时的默认背景 */
+  transition: box-shadow 0.2s, transform 0.1s, background 0.2s;
 }
 
 .record-card:hover {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
   transform: translateY(-1px);
+}
+
+/* 信息区域（公司/岗位/状态） */
+.card-info {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  flex: 1;
 }
 
 .card-field {
@@ -219,7 +252,6 @@ const addRecord = () => {
   font-weight: 600;
   color: #64748b;
   font-size: 14px;
-  white-space: nowrap;
 }
 
 .card-value {
@@ -230,11 +262,66 @@ const addRecord = () => {
 
 .card-status {
   font-weight: 600;
-  color: #0f172a;
-  background: #dbeafe;
+  font-size: 13px;
   padding: 4px 12px;
   border-radius: 20px;
-  font-size: 13px;
+  background: #e2e8f0; /* 默认灰底 */
+  color: #334155;
+  white-space: nowrap;
+}
+
+/* 删除按钮 */
+.delete-btn {
+  background: none;
+  border: 1px solid #e2e8f0;
+  color: #94a3b8;
+  padding: 6px 16px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.delete-btn:hover {
+  background: #fee2e2;
+  border-color: #fecaca;
+  color: #dc2626;
+}
+
+/* ============================== */
+/* 状态对应的背景色 + 左边框色 */
+/* ============================== */
+.record-card.status-pending {
+  background: #eff6ff;      /* 淡蓝背景 */
+  border-left-color: #3b82f6; /* 蓝色左边框 */
+}
+
+.record-card.status-interview {
+  background: #fff7ed;      /* 淡橙背景 */
+  border-left-color: #f97316; /* 橙色左边框 */
+}
+
+.record-card.status-offer {
+  background: #f0fdf4;      /* 淡绿背景 */
+  border-left-color: #22c55e; /* 绿色左边框 */
+}
+
+/* 如果需要，可以覆盖状态下状态标签的颜色（可选） */
+.status-pending .card-status {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.status-interview .card-status {
+  background: #ffedd5;
+  color: #c2410c;
+}
+
+.status-offer .card-status {
+  background: #dcfce7;
+  color: #15803d;
 }
 
 /* 空状态提示 */
