@@ -2,8 +2,19 @@
   <div class="tracker-container">
     <h1 class="page-title">岗位投递追踪板</h1>
 
-    <!-- 筛选与排序区域 -->
+    <!-- 工具栏：搜索（手动触发） + 筛选 + 排序 -->
     <div class="toolbar">
+      <div class="toolbar-item">
+        <label class="toolbar-label">搜索：</label>
+        <input
+          v-model="tempSearch"
+          type="text"
+          placeholder="输入公司或岗位关键词，按回车或点击搜索"
+          class="toolbar-search"
+          @keyup.enter="triggerSearch"
+        />
+        <button class="search-btn" @click="triggerSearch">搜索</button>
+      </div>
       <div class="toolbar-item">
         <label class="toolbar-label">筛选状态：</label>
         <select v-model="selectedStatus" class="toolbar-select">
@@ -16,14 +27,14 @@
       <div class="toolbar-item">
         <label class="toolbar-label">排序方式：</label>
         <select v-model="sortBy" class="toolbar-select">
-          <option value="">添加顺序（默认）</option>
+          <option value="">默认（添加顺序）</option>
           <option value="company">按公司名排序</option>
           <option value="job">按岗位名排序</option>
         </select>
       </div>
     </div>
 
-    <!-- 输入区域（原有功能不变） -->
+    <!-- 添加记录输入区 -->
     <div class="input-group">
       <input
         v-model="companyInput"
@@ -46,7 +57,7 @@
       <button class="add-btn" @click="addRecord">添加投递记录</button>
     </div>
 
-    <!-- 记录卡片列表（渲染筛选排序后的结果） -->
+    <!-- 记录卡片列表（渲染最终的筛选、搜索、排序结果） -->
     <div class="records-list">
       <div
         v-for="record in filteredSortedRecords"
@@ -67,12 +78,8 @@
             <span class="card-status">{{ record.status }}</span>
           </div>
         </div>
-
-        <!-- 删除按钮：传递整条记录对象，而不是索引，以兼容筛选排序场景 -->
         <button class="delete-btn" @click="deleteRecord(record)">删除</button>
       </div>
-
-      <!-- 没有记录时的空状态提示 -->
       <div v-if="filteredSortedRecords.length === 0" class="empty-tip">
         还没有符合条件的投递记录
       </div>
@@ -94,15 +101,33 @@ const statusInput = ref('')
  * 数组能方便地：
  * 1. 按索引访问每一条；
  * 2. 用 push() 尾部追加，保持时间序；
- * 3. 配合 v-for 批量渲染。
- *
- * 本次新增：每条记录都带一个唯一 id，方便在筛选和排序后仍能准确定位原始数据。
+ * 3. 配合 v-for 批量渲染卡片。
+ * 每条记录携带唯一 id，方便在筛选、搜索、排序后精准操作。
  */
 const records = ref([])
 
-// ==================== 筛选与排序状态 ====================
-const selectedStatus = ref('全部')        // 当前选中的筛选状态
-const sortBy = ref('')                    // 当前选中的排序字段：'company' | 'job' | ''
+// ==================== 搜索、筛选、排序状态 ====================
+/*
+ * 关键改动：搜索不再直接绑定到 searchKeyword，
+ * 而是先用 tempSearch 临时存放用户输入，等用户主动触发搜索时才更新 searchKeyword。
+ * 这样列表不会随输入实时刷新，而是用户决定何时执行搜索。
+ */
+const tempSearch = ref('')          // 输入框绑定的临时文本
+const searchKeyword = ref('')       // 真正用于过滤的关键词（由 triggerSearch 更新）
+const selectedStatus = ref('全部')
+const sortBy = ref('')
+
+// ==================== 触发搜索 ====================
+/**
+ * 搜索的触发原理：
+ * - 用户点击“搜索”按钮或按 Enter 键时，调用 triggerSearch 函数。
+ * - 该函数将 tempSearch 的当前值（去除首尾空格）赋给 searchKeyword。
+ * - searchKeyword 是一个 ref，值一旦变化，依赖它的 computed（filteredSortedRecords）会自动重新计算。
+ * - 于是卡片列表立即更新为最新的筛选 + 搜索 + 排序结果。
+ */
+const triggerSearch = () => {
+  searchKeyword.value = tempSearch.value.trim()
+}
 
 // ==================== 添加记录（功能不变） ====================
 const addRecord = () => {
@@ -115,34 +140,22 @@ const addRecord = () => {
     return
   }
 
-  /**
-   * 每条记录为什么用对象？
-   * 一条记录包含多个关联属性（公司、岗位、状态），
-   * 用对象可以打包在一起，访问清晰，并方便携带唯一 id。
-   */
   records.value.push({
-    id: Date.now() + Math.random(),  // 简单唯一标识
+    id: Date.now() + Math.random(),
     company,
     job,
     status
   })
 
-  // 清空输入框
   companyInput.value = ''
   jobInput.value = ''
   statusInput.value = ''
 }
 
-// ==================== 删除记录 ====================
-/**
- * 删除一条记录，接收记录对象而不是索引。
- * 这样即使当前渲染的列表经过了筛选和排序，仍能准确删除原始数组中的对应项。
- */
+// ==================== 删除记录（基于对象 + id） ====================
 const deleteRecord = (record) => {
-  // 在原始数组中查找当前记录对象的索引
   const index = records.value.findIndex(item => item.id === record.id)
   if (index !== -1) {
-    // splice(起始位置, 删除个数) 会从数组中移除该元素，并触发响应式更新
     records.value.splice(index, 1)
   }
 }
@@ -156,32 +169,40 @@ const getStatusClass = (status) => {
   return ''
 }
 
-// ==================== 计算属性：筛选 + 排序后的列表 ====================
+// ==================== 计算属性：筛选 + 搜索 + 排序（三合一） ====================
 /**
- * 先根据 selectedStatus 筛选，再根据 sortBy 排序。
- * 使用 computed 保证当 records、筛选条件或排序方式变化时，界面自动更新。
+ * 这个 computed 是 Vue 响应式的核心体现。
+ * 当 records、selectedStatus、searchKeyword、sortBy 中任何一个 ref 发生变化时，
+ * Vue 会自动重新运行这个函数，得到新列表并更新页面。
  */
 const filteredSortedRecords = computed(() => {
-  // 第一步：筛选
-  let result = records.value.filter(record => {
-    /**
-     * filter() 方法会遍历数组中的每一个元素，并返回一个新数组，
-     * 新数组中只包含那些让回调函数返回 true 的元素。
-     * 这里如果 selectedStatus 是 '全部'，保留所有记录；
-     * 否则只保留 status 完全匹配的那一部分。
-     */
-    if (selectedStatus.value === '全部') return true
-    return record.status.trim() === selectedStatus.value
-  })
+  let result = records.value
 
-  // 第二步：排序（只在 sortBy 不为空时进行）
+  // 第一步：状态筛选
+  if (selectedStatus.value !== '全部') {
+    result = result.filter(record => record.status.trim() === selectedStatus.value)
+  }
+
+  // 第二步：关键词搜索（忽略大小写）
+  const keyword = searchKeyword.value
+  if (keyword) {
+    /**
+     * includes() 判断子字符串原理：
+     * 字符串的 includes(sub) 方法会检查该字符串内是否包含子串 sub，
+     * 包含则返回 true，否则返回 false。
+     * includes 区分大小写，所以先用 toLowerCase() 将双方转为小写来达到忽略大小写的效果。
+     */
+    result = result.filter(record => {
+      return record.company.toLowerCase().includes(keyword.toLowerCase()) ||
+             record.job.toLowerCase().includes(keyword.toLowerCase())
+    })
+  }
+
+  // 第三步：排序（需要时）
   if (sortBy.value) {
     /**
-     * sort() 方法会直接对原数组进行排序，并返回排序后的数组。
-     * 为了保证不修改 computed 内部产生的临时数组（导致副作用），
-     * 我们先 slice() 浅拷贝一份，再在拷贝上调用 sort。
-     * 排序字段：'company' 按公司名升序，'job' 按岗位名升序。
-     * localeCompare() 能正确处理中文字符串比较。
+     * sort() 会直接修改调用它的数组，为避免副作用，先用 slice() 浅拷贝一份再排序。
+     * localeCompare 能正确处理中文字符的排序（按拼音升序）。
      */
     result = result.slice().sort((a, b) => {
       const fieldA = a[sortBy.value] || ''
@@ -214,7 +235,7 @@ const filteredSortedRecords = computed(() => {
   letter-spacing: -0.5px;
 }
 
-/* 工具栏（筛选 & 排序） */
+/* 工具栏 */
 .toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -236,6 +257,38 @@ const filteredSortedRecords = computed(() => {
   font-weight: 600;
   color: #475569;
   white-space: nowrap;
+}
+
+.toolbar-search {
+  padding: 8px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  font-size: 14px;
+  color: #334155;
+  background: white;
+  outline: none;
+  min-width: 180px;
+}
+
+.toolbar-search:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}
+
+.search-btn {
+  padding: 8px 16px;
+  background: #3b82f6;
+  color: white;
+  font-weight: 600;
+  font-size: 14px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.search-btn:hover {
+  background: #2563eb;
 }
 
 .toolbar-select {
@@ -379,7 +432,7 @@ const filteredSortedRecords = computed(() => {
   color: #dc2626;
 }
 
-/* 状态背景色（保持不变） */
+/* 状态背景色与边框色 */
 .record-card.status-pending {
   background: #eff6ff;
   border-left-color: #3b82f6;
@@ -410,7 +463,7 @@ const filteredSortedRecords = computed(() => {
   color: #15803d;
 }
 
-/* 空状态 */
+/* 空状态提示 */
 .empty-tip {
   text-align: center;
   color: #94a3b8;
