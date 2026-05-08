@@ -2,14 +2,14 @@
   <div class="tracker-container">
     <h1 class="page-title">岗位投递追踪板</h1>
 
-    <!-- 工具栏：搜索（手动触发） + 筛选 + 排序 -->
+    <!-- 工具栏：搜索（手动触发 + 多关键词）、筛选、排序 -->
     <div class="toolbar">
       <div class="toolbar-item">
         <label class="toolbar-label">搜索：</label>
         <input
           v-model="tempSearch"
           type="text"
-          placeholder="输入公司或岗位关键词，按回车或点击搜索"
+          placeholder="多关键词用空格分隔，按回车或点击搜索"
           class="toolbar-search"
           @keyup.enter="triggerSearch"
         />
@@ -34,7 +34,7 @@
       </div>
     </div>
 
-    <!-- 添加记录输入区 -->
+    <!-- 新增记录区域 -->
     <div class="input-group">
       <input
         v-model="companyInput"
@@ -57,7 +57,7 @@
       <button class="add-btn" @click="addRecord">添加投递记录</button>
     </div>
 
-    <!-- 记录卡片列表（渲染最终的筛选、搜索、排序结果） -->
+    <!-- 记录卡片列表 -->
     <div class="records-list">
       <div
         v-for="record in filteredSortedRecords"
@@ -90,46 +90,25 @@
 <script setup>
 import { ref, computed } from 'vue'
 
-// ==================== 基础数据 ====================
+// ---------- 基础数据 ----------
 const companyInput = ref('')
 const jobInput = ref('')
 const statusInput = ref('')
 
-/**
- * records 为什么用数组？
- * 投递记录按添加时间顺序排列，数量会动态增长。
- * 数组能方便地：
- * 1. 按索引访问每一条；
- * 2. 用 push() 尾部追加，保持时间序；
- * 3. 配合 v-for 批量渲染卡片。
- * 每条记录携带唯一 id，方便在筛选、搜索、排序后精准操作。
- */
 const records = ref([])
 
-// ==================== 搜索、筛选、排序状态 ====================
-/*
- * 关键改动：搜索不再直接绑定到 searchKeyword，
- * 而是先用 tempSearch 临时存放用户输入，等用户主动触发搜索时才更新 searchKeyword。
- * 这样列表不会随输入实时刷新，而是用户决定何时执行搜索。
- */
-const tempSearch = ref('')          // 输入框绑定的临时文本
-const searchKeyword = ref('')       // 真正用于过滤的关键词（由 triggerSearch 更新）
+// ---------- 搜索、筛选、排序状态 ----------
+const tempSearch = ref('')           // 绑定输入框的临时搜索文本
+const searchKeyword = ref('')        // 实际用于过滤的关键词字符串（可能包含多个空格分隔的词）
 const selectedStatus = ref('全部')
 const sortBy = ref('')
 
-// ==================== 触发搜索 ====================
-/**
- * 搜索的触发原理：
- * - 用户点击“搜索”按钮或按 Enter 键时，调用 triggerSearch 函数。
- * - 该函数将 tempSearch 的当前值（去除首尾空格）赋给 searchKeyword。
- * - searchKeyword 是一个 ref，值一旦变化，依赖它的 computed（filteredSortedRecords）会自动重新计算。
- * - 于是卡片列表立即更新为最新的筛选 + 搜索 + 排序结果。
- */
+// ---------- 触发搜索 ----------
 const triggerSearch = () => {
   searchKeyword.value = tempSearch.value.trim()
 }
 
-// ==================== 添加记录（功能不变） ====================
+// ---------- 添加记录 ----------
 const addRecord = () => {
   const company = companyInput.value.trim()
   const job = jobInput.value.trim()
@@ -152,7 +131,7 @@ const addRecord = () => {
   statusInput.value = ''
 }
 
-// ==================== 删除记录（基于对象 + id） ====================
+// ---------- 删除记录（基于 id） ----------
 const deleteRecord = (record) => {
   const index = records.value.findIndex(item => item.id === record.id)
   if (index !== -1) {
@@ -160,7 +139,7 @@ const deleteRecord = (record) => {
   }
 }
 
-// ==================== 状态背景色映射 ====================
+// ---------- 状态背景色映射 ----------
 const getStatusClass = (status) => {
   const s = status.trim()
   if (s === '已投递') return 'status-pending'
@@ -169,41 +148,35 @@ const getStatusClass = (status) => {
   return ''
 }
 
-// ==================== 计算属性：筛选 + 搜索 + 排序（三合一） ====================
-/**
- * 这个 computed 是 Vue 响应式的核心体现。
- * 当 records、selectedStatus、searchKeyword、sortBy 中任何一个 ref 发生变化时，
- * Vue 会自动重新运行这个函数，得到新列表并更新页面。
- */
+// ---------- 计算属性：筛选 + 多关键词搜索 + 排序 ----------
 const filteredSortedRecords = computed(() => {
   let result = records.value
 
-  // 第一步：状态筛选
+  // 1. 状态筛选
   if (selectedStatus.value !== '全部') {
     result = result.filter(record => record.status.trim() === selectedStatus.value)
   }
 
-  // 第二步：关键词搜索（忽略大小写）
-  const keyword = searchKeyword.value
-  if (keyword) {
-    /**
-     * includes() 判断子字符串原理：
-     * 字符串的 includes(sub) 方法会检查该字符串内是否包含子串 sub，
-     * 包含则返回 true，否则返回 false。
-     * includes 区分大小写，所以先用 toLowerCase() 将双方转为小写来达到忽略大小写的效果。
-     */
-    result = result.filter(record => {
-      return record.company.toLowerCase().includes(keyword.toLowerCase()) ||
-             record.job.toLowerCase().includes(keyword.toLowerCase())
-    })
+  // 2. 多关键词搜索（空格分隔，OR 逻辑，忽略大小写）
+  const rawKeyword = searchKeyword.value.trim()
+  if (rawKeyword) {
+    // 将搜索字符串按空格分割成多个关键词，并过滤掉空字符串
+    const keywords = rawKeyword.split(/\s+/).filter(k => k.length > 0)
+    if (keywords.length > 0) {
+      result = result.filter(record => {
+        const company = record.company.toLowerCase()
+        const job = record.job.toLowerCase()
+        // 任意关键词匹配公司或岗位即保留记录
+        return keywords.some(kw => {
+          const lowerKw = kw.toLowerCase()
+          return company.includes(lowerKw) || job.includes(lowerKw)
+        })
+      })
+    }
   }
 
-  // 第三步：排序（需要时）
+  // 3. 排序
   if (sortBy.value) {
-    /**
-     * sort() 会直接修改调用它的数组，为避免副作用，先用 slice() 浅拷贝一份再排序。
-     * localeCompare 能正确处理中文字符的排序（按拼音升序）。
-     */
     result = result.slice().sort((a, b) => {
       const fieldA = a[sortBy.value] || ''
       const fieldB = b[sortBy.value] || ''
