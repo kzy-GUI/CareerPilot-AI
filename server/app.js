@@ -4,6 +4,7 @@
 // 1. 引入 express 框架
 const express = require('express')
 
+// 2. 引入 cors 中间件，用于处理跨域请求
 const cors = require('cors')
 
 // 创建 Express 应用实例
