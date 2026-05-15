@@ -17,44 +17,70 @@ const mysql = require('mysql2/promise')
 const app = express()
 
 // 5. 配置 CORS 中间件
-//    作用：允许来自前端开发服务器（localhost:5173）的请求访问后端接口，
-//    解决前后端分离时的跨域问题。
 app.use(cors())
 
 // 6. 配置 JSON 解析中间件
-//    作用：自动解析前端发来的 JSON 格式的请求体，解析后可通过 req.body 获取数据。
 app.use(express.json())
 
 // 7. 创建 MySQL 连接池（从环境变量读取配置）
 const pool = mysql.createPool({
-  host: process.env.DB_HOST,      // 数据库主机地址
-  user: process.env.DB_USER,      // 数据库用户名
-  password: process.env.DB_PASSWORD, // 数据库密码
-  database: process.env.DB_NAME,  // 数据库名称
-  port: process.env.DB_PORT || 3306, // 数据库端口，默认 3306
-  waitForConnections: true,       // 当连接池无可用连接时，是否等待
-  connectionLimit: 10,            // 连接池最大连接数
-  queueLimit: 0                   // 等待队列最大长度（0 表示无限制）
+  host: process.env.DB_HOST,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
+  port: process.env.DB_PORT || 3306,
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0 
 })
 
-// 8. 测试数据库连接（在启动时验证配置是否正确）
+// 8. 测试数据库连接（启动时验证）
 ;(async function testDbConnection() {
   try {
-    // 从连接池获取一个连接
     const connection = await pool.getConnection()
-    // 执行简单查询验证连接有效性
     await connection.query('SELECT 1')
-    // 释放连接回连接池
     connection.release()
     console.log('✅ MySQL 数据库连接成功')
   } catch (err) {
     console.error('❌ MySQL 数据库连接失败:', err.message)
-    // 注意：这里不终止进程，允许服务继续启动（后续请求时会再次尝试连接）
   }
 })()
 
-// 9. 健康检查接口（保留原有功能）
-//    当访问 GET /api/health 时，返回服务运行状态。
+// -----------------------------
+// 以下三个工具函数会帮助我们：
+// 1. 将数字状态码翻译成中文
+// 2. 统一处理成功/失败响应
+// -----------------------------
+
+/**
+ * 状态码 → 中文映射
+ * 为什么放在后端：前端只关心展示层，数据语义由后端保证，
+ * 便于未来扩展多语言支持或调整文案。
+ */
+const STATUS_MAP = {
+  0: '已投递',
+  1: '面试中',
+  2: '已录用',
+  3: '已拒绝'
+}
+
+/**
+ * 将数据库返回的记录中的 status 字段翻译为中文
+ * @param {Array} records - 数据库原始记录数组
+ * @returns {Array} 翻译后的记录数组
+ */
+function translateStatus(records) {
+  return records.map(record => ({
+    ...record,
+    statusText: STATUS_MAP[record.status] || '未知状态'
+  }))
+}
+
+// ==========================================
+//  接口定义
+// ==========================================
+
+// 9. 健康检查接口
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
@@ -62,25 +88,19 @@ app.get('/api/health', (req, res) => {
   })
 })
 
-// 10. 数据库测试接口（新增）
-//     当访问 GET /api/db-test 时，尝试执行 SELECT 1，返回数据库连接状态。
+// 10. 数据库测试接口
 app.get('/api/db-test', async (req, res) => {
   try {
-    // 从连接池获取连接
     const connection = await pool.getConnection()
-    // 执行测试查询
     const [rows] = await connection.query('SELECT 1 AS result')
-    // 释放连接
     connection.release()
-    // 返回成功响应
     res.json({
       success: true,
       message: '数据库连接正常',
-      data: rows[0] // 应返回 { result: 1 }
+      data: rows[0]
     })
   } catch (err) {
     console.error('数据库测试接口出错:', err.message)
-    // 返回错误响应，状态码 500 表示服务器内部错误
     res.status(500).json({
       success: false,
       message: '数据库连接失败',
@@ -89,7 +109,119 @@ app.get('/api/db-test', async (req, res) => {
   }
 })
 
-// 11. 启动服务器，监听 3001 端口
+// ==========================================
+// ★ 新增/修改的接口 ↓
+// ==========================================
+
+/**
+ * 11. 获取投递记录（支持按状态筛选）
+ *    路径：GET /api/records?status=0|1|2|3
+ *    如果无 status 参数则返回全部记录
+ */
+app.get('/api/records', async (req, res) => {
+  let connection;
+  try {
+    connection = await pool.getConnection();
+
+    const { status } = req.query;
+
+    let sql = 'SELECT * FROM job_application_records';
+    const params = [];
+
+    // 如果有状态筛选参数，则添加 WHERE 条件
+    if (status !== undefined && status !== '') {
+      // 将字符串转为整数，保证参数类型安全
+      const statusInt = parseInt(status, 10);
+      sql += ' WHERE status = ?';
+      params.push(statusInt);
+    }
+
+    sql += ' ORDER BY apply_date DESC';
+
+    const [rows] = await connection.query(sql, params);
+    const data = translateStatus(rows);   // 将状态码转为中文
+
+    res.json({
+      success: true,
+      data
+    });
+  } catch (err) {
+    console.error('查询记录出错:', err.message);
+    res.status(500).json({
+      success: false,
+      message: '查询失败',
+      error: err.message
+    });
+  } finally {
+    if (connection) connection.release();  // 无论成功失败都必须释放连接
+  }
+});
+
+/**
+ * 12. 删除投递记录
+ *    路径：DELETE /api/records/:id
+ *    必须使用参数化查询防止 SQL 注入
+ */
+app.delete('/api/records/:id', async (req, res) => {
+  let connection;
+  try {
+    // 1. 获取并清洗 id
+    const rawId = req.params.id;
+    const id = parseInt(rawId, 10);
+
+    // 2. 验证 id 是否有效整数
+    if (isNaN(id) || id <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: '无效的记录 ID'
+      });
+    }
+
+    // 3. 从连接池获取连接
+    connection = await pool.getConnection();
+
+    /**
+     * 【参数化查询如何防止 SQL 注入】
+     * 我们使用 `?` 占位符，并将实际值通过数组 [id] 传入。
+     * mysql2 库会在执行前自动对参数进行转义处理：
+     *   - 将 id 值安全地嵌入 SQL，而不是直接拼接字符串。
+     *   - 即使恶意用户传入 "1; DROP TABLE users;--"，
+     *     转义后整个值会变成一个普通字符串，不会当作 SQL 命令执行。
+     * 这样就杜绝了任何通过输入篡改 SQL 逻辑的可能。
+     */
+    const [result] = await connection.query(
+      'DELETE FROM job_application_records WHERE id = ?',
+      [id]
+    );
+
+    // 4. 根据受影响行数判断删除结果
+    if (result.affectedRows === 0) {
+      return res.status(404).json({
+        success: false,
+        message: '记录不存在'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: '删除成功'
+    });
+  } catch (err) {
+    console.error('删除记录出错:', err.message);
+    res.status(500).json({
+      success: false,
+      message: '删除失败',
+      error: err.message
+    });
+  } finally {
+    if (connection) connection.release();  // 必须释放连接
+  }
+});
+
+// ==========================================
+//  服务器启动
+// ==========================================
+
 app.listen(3001, () => {
   console.log('CareerPilot 后端服务已启动: http://localhost:3001')
-})
+});
