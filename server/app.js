@@ -109,10 +109,6 @@ app.get('/api/db-test', async (req, res) => {
   }
 })
 
-// ==========================================
-// ★ 新增/修改的接口 ↓
-// ==========================================
-
 /**
  * 11. 获取投递记录（支持按状态筛选）
  *    路径：GET /api/records?status=0|1|2|3
@@ -156,6 +152,8 @@ app.get('/api/records', async (req, res) => {
     if (connection) connection.release();  // 无论成功失败都必须释放连接
   }
 });
+
+
 
 /**
  * 12. 删除投递记录
@@ -218,6 +216,89 @@ app.delete('/api/records/:id', async (req, res) => {
   }
 });
 
+/**
+ * 13. 新增投递记录
+ *     路径：POST /api/records
+ *     请求体示例：
+ *     {
+ *       "company": "字节跳动",
+ *       "position": "前端开发",
+ *       "applyDate": "2026-05-15",
+ *       "status": 0,
+ *       "note": "内推"
+ *     }
+ */
+app.post('/api/records', async (req, res) => {
+  let connection;
+  try {
+    // 1. 解构请求体，注意前端字段 applyDate 对应数据库列 apply_date
+    const { company, position, applyDate, status, note } = req.body;
+
+    // 2. 必填字段校验
+    if (!company || !position || !applyDate || status === undefined || status === null) {
+      return res.status(400).json({
+        success: false,
+        message: '必填字段缺失：company, position, applyDate, status 为必填项'
+      });
+    }
+
+    // 3. 状态值合法性校验
+    const validStatuses = [0, 1, 2, 3];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: `status 无效，只允许以下值：${validStatuses.join(', ')}`
+      });
+    }
+
+    // 4. 获取连接
+    connection = await pool.getConnection();
+
+    // 5. 参数化插入（自动转义，防止 SQL 注入）
+    const [result] = await connection.query(
+      `INSERT INTO job_application_records 
+       (company, position, apply_date, status, note)
+       VALUES (?, ?, ?, ?, ?)`,
+      [company, position, applyDate, status, note || null]
+    );
+
+    // 6. 根据 insertId 查出完整记录（包含自动生成的 id, created_at, updated_at）
+    const [rows] = await connection.query(
+      'SELECT * FROM job_application_records WHERE id = ?',
+      [result.insertId]
+    );
+
+    if (rows.length === 0) {
+      return res.status(500).json({
+        success: false,
+        message: '记录插入后查询失败，请重试'
+      });
+    }
+
+    // 7. 状态码翻译为中文，返回给前端
+    const newRecord = translateStatus(rows)[0];
+
+    // 8. 201 Created
+    res.status(201).json({
+      success: true,
+      data: newRecord
+    });
+
+  } catch (err) {
+    console.error('新增记录出错:', err.message);
+    res.status(500).json({
+      success: false,
+      message: '新增记录失败',
+      error: err.message
+    });
+  } finally {
+    if (connection) connection.release();  // 释放连接
+  }
+});
+
+app.post('/api/test', (req, res) => {
+  res.json({ success: true });
+});
 // ==========================================
 //  服务器启动
 // ==========================================

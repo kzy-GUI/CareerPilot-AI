@@ -50,13 +50,15 @@
 import { ref, computed, onMounted } from 'vue'
 import SearchToolbar from '@/components/SearchToolbar.vue'
 import RecordCard from '@/components/RecordCard.vue'
+// ★ 引入状态映射（中文 → 数字）
+import { STATUS_REVERSE_MAP } from '@/constants'
 
 // ---------- 表单输入绑定 ----------
 const companyInput = ref('')
 const jobInput = ref('')
 const statusInput = ref('')
 
-// ---------- 数据存储（改为从后端获取）----------
+// ---------- 数据存储 ----------
 const records = ref([])
 
 // ---------- 搜索/筛选/排序状态 ----------
@@ -65,30 +67,19 @@ const searchKeyword = ref('')
 const selectedStatus = ref('全部')
 const sortBy = ref('')
 
-// ---------- 后端 API 基础地址 ----------
 const API_BASE = 'http://localhost:3001/api'
 
-/**
- * 从后端加载所有投递记录
- * 将后端字段映射为前端组件使用的字段：
- *   - id        → id
- *   - company   → company
- *   - position  → job       （前端原使用 job，后端使用 position）
- *   - statusText → status   （后端已翻译为中文）
- */
+// ---------- 获取全部记录 ----------
 async function fetchRecords() {
   try {
     const response = await fetch(`${API_BASE}/records`)
     const result = await response.json()
-
     if (result.success) {
-      // 映射后端字段到前端组件期望的结构
       records.value = result.data.map(item => ({
         id: item.id,
         company: item.company,
-        job: item.position,           // 后端字段 position → 前端 job
-        status: item.statusText,      // 后端翻译好的中文状态
-        // 保留原始字段，方便后续扩展（如详情展示）
+        job: item.position,         // 后端 position → 前端 job
+        status: item.statusText,    // 后端已翻译的中文
         applyDate: item.apply_date,
         note: item.note
       }))
@@ -97,56 +88,81 @@ async function fetchRecords() {
     }
   } catch (err) {
     console.error('网络请求错误：', err.message)
-    alert('无法连接到后端服务，请检查服务是否已启动')
+    alert('无法连接到后端服务')
   }
 }
 
-// 组件挂载时自动加载数据
 onMounted(() => {
   fetchRecords()
 })
 
-// ---------- 搜索触发 ----------
+// ---------- 搜索 ----------
 const triggerSearch = () => {
   searchKeyword.value = tempSearch.value.trim()
 }
 
-// ---------- 新增记录（当前仅本地操作，暂未连接后端）----------
-const addRecord = () => {
+// ---------- 新增记录（改为异步，对接 POST 接口）----------
+const addRecord = async () => {
   const company = companyInput.value.trim()
   const job = jobInput.value.trim()
-  const status = statusInput.value.trim()
+  const statusText = statusInput.value.trim()
 
-  if (!company || !job || !status) {
+  if (!company || !job || !statusText) {
     alert('请填写完整的公司名称、岗位名称和当前状态！')
     return
   }
 
-  // 注意：目前未对接后端创建接口，新增的记录只存在于本地，
-  // 刷新页面后会丢失。后续需要增加 POST /api/records 接口。
-  records.value.push({
-    id: Date.now() + Math.random(), // 临时 ID
-    company,
-    job,
-    status
-  })
-
-  companyInput.value = ''
-  jobInput.value = ''
-  statusInput.value = ''
-}
-
-// ---------- 删除记录（调用后端 DELETE 接口）----------
-const deleteRecord = async (record) => {
-  // 如果是本地临时添加的记录（id 为浮点数或很大），不发起后端请求，直接本地删除
-  if (typeof record.id !== 'number' || record.id > 1e12) {
-    // 临时记录：直接前端移除
-    const index = records.value.findIndex(item => item.id === record.id)
-    if (index !== -1) records.value.splice(index, 1)
+  // 将中文状态转为数字，如果输入不合法则提示
+  const statusNumber = STATUS_REVERSE_MAP[statusText]
+  if (statusNumber === undefined) {
+    alert('状态请输入：已投递 / 面试中 / 已录用 / 已拒绝')
     return
   }
 
-  // 后端记录：调用删除接口
+  // 构造请求体（字段名需与后端保持一致）
+  const payload = {
+  company,
+  position: job,
+  applyDate: new Date().toISOString().slice(0, 10),  // ✅ 与后端一致
+  status: statusNumber,
+  note: null
+}
+
+  try {
+    const response = await fetch(`${API_BASE}/records`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+    const result = await response.json()
+
+    if (result.success) {
+      // 将后端返回的新记录映射为前端格式，追加到数组
+      const newRecord = {
+        id: result.data.id,
+        company: result.data.company,
+        job: result.data.position,
+        status: result.data.statusText,
+        applyDate: result.data.apply_date,
+        note: result.data.note
+      }
+      records.value.push(newRecord)
+
+      // 清空输入框
+      companyInput.value = ''
+      jobInput.value = ''
+      statusInput.value = ''
+    } else {
+      alert('添加失败：' + result.message)
+    }
+  } catch (err) {
+    console.error('添加请求出错：', err.message)
+    alert('网络错误，添加失败')
+  }
+}
+
+// ---------- 删除记录（移除临时 ID 判断）----------
+const deleteRecord = async (record) => {
   try {
     const response = await fetch(`${API_BASE}/records/${record.id}`, {
       method: 'DELETE'
@@ -154,7 +170,6 @@ const deleteRecord = async (record) => {
     const result = await response.json()
 
     if (result.success) {
-      // 从本地数组中移除
       const index = records.value.findIndex(item => item.id === record.id)
       if (index !== -1) records.value.splice(index, 1)
     } else {
@@ -166,16 +181,14 @@ const deleteRecord = async (record) => {
   }
 }
 
-// ---------- 本地筛选 + 排序（保持不变）----------
+// ---------- 本地筛选 + 排序 ----------
 const filteredSortedRecords = computed(() => {
   let result = records.value
 
-  // 状态筛选
   if (selectedStatus.value !== '全部') {
     result = result.filter(record => record.status.trim() === selectedStatus.value)
   }
 
-  // 关键词搜索（公司或岗位）
   const rawKeyword = searchKeyword.value.trim()
   if (rawKeyword) {
     const keywords = rawKeyword.split(/\s+/).filter(k => k.length > 0)
@@ -191,7 +204,6 @@ const filteredSortedRecords = computed(() => {
     }
   }
 
-  // 排序
   if (sortBy.value) {
     result = result.slice().sort((a, b) => {
       const fieldA = a[sortBy.value] || ''
