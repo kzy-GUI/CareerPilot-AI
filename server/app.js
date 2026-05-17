@@ -1,25 +1,28 @@
 // server/app.js
 // CareerPilot AI 后端服务入口
 
-// 1. 加载环境变量（必须最先执行，确保后续代码能读取 .env 中的配置）
+// 1. 加载环境变量（必须最先执行）
 require('dotenv').config()
 
 // 2. 引入 express 框架
 const express = require('express')
 
-// 3. 引入 cors 中间件，用于处理跨域请求
+// 3. 引入 cors 中间件
 const cors = require('cors')
 
-// 4. 引入 mysql2/promise，支持异步操作和连接池
+// 4. 引入 mysql2/promise
 const mysql = require('mysql2/promise')
+
+// 5. 引入 AI 学习路线路由
+const learningPathRouter = require('./routes/learningPath')
 
 // 创建 Express 应用实例
 const app = express()
 
-// 5. 配置 CORS 中间件
+// 配置 CORS 中间件
 app.use(cors())
 
-// 6. 配置 JSON 解析中间件
+// 配置 JSON 解析中间件
 app.use(express.json())
 
 // 7. 创建 MySQL 连接池（从环境变量读取配置）
@@ -296,9 +299,22 @@ app.post('/api/records', async (req, res) => {
   }
 });
 
+
+// 挂载 AI 学习路线路由
+app.use('/api', learningPathRouter);
+
 app.post('/api/test', (req, res) => {
   res.json({ success: true });
 });
+
+// ==========================================
+//  服务器启动前检查
+// ==========================================
+if (!process.env.DEEPSEEK_API_KEY) {
+  console.warn('⚠️  警告：DEEPSEEK_API_KEY 未在 .env 中配置，AI 学习路线生成功能将不可用');
+} else {
+  console.log('✅ DEEPSEEK_API_KEY 已加载');
+}
 // ==========================================
 //  服务器启动
 // ==========================================

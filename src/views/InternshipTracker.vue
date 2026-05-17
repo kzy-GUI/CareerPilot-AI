@@ -1,7 +1,7 @@
 <!-- InternshipTracker.vue -->
 <template>
   <div class="tracker-container">
-    <h1 class="page-title">岗位投递追踪板</h1>
+    <h1 class="page-title">offer奔赴记录表</h1>
 
     <SearchToolbar
       v-model:temp-search="tempSearch"
@@ -29,7 +29,7 @@
         placeholder="当前状态（如：已投递/面试中/已录用）"
         class="tracker-input"
       />
-      <button class="add-btn" @click="addRecord">添加投递记录</button>
+      <button class="add-btn" @click="addRecord">add record</button>
     </div>
 
     <div class="records-list">

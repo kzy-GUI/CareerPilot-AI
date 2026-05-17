@@ -10,31 +10,45 @@
         placeholder="请输入目标岗位，如：Java后端、前端开发"
         class="job-input"
         @keyup.enter="generatePath"
+        :disabled="isLoading"
       />
-      <button class="generate-btn" @click="generatePath">生成学习路线</button>
+      <button
+        class="generate-btn"
+        @click="generatePath"
+        :disabled="isLoading || !jobInput.trim()"
+      >
+        {{ isLoading ? '生成中...' : '生成学习路线' }}
+      </button>
+    </div>
+
+    <!-- 错误提示 -->
+    <div v-if="errorMessage" class="error-message">
+      {{ errorMessage }}
+      <button class="retry-btn" @click="errorMessage = ''">关闭</button>
     </div>
 
     <!-- 生成结果展示区 -->
     <div v-if="learningPath.length > 0" class="path-container">
       <div
-        v-for="(stage, index) in learningPath"
-        :key="index"
+        v-for="week in learningPath"
+        :key="week.week"
         class="stage-card"
       >
         <div class="stage-header">
-          <span class="stage-number">阶段 {{ index + 1 }}</span>
-          <h3 class="stage-title">{{ stage.title }}</h3>
+          <span class="stage-number">第 {{ week.week }} 周</span>
+          <h3 class="stage-title">{{ week.title }}</h3>
         </div>
         <ul class="tips-list">
-          <li v-for="(tip, tIndex) in stage.tips" :key="tIndex" class="tip-item">
-            {{ tip }}
+          <li v-for="(task, tIndex) in week.tasks" :key="tIndex" class="tip-item">
+            {{ task }}
           </li>
         </ul>
       </div>
+      <p class="ai-disclaimer">内容由 DeepSeek-v4-flash 生成，请仔细甄别</p>
     </div>
 
     <!-- 未找到路线时的提示 -->
-    <div v-else-if="hasSearched" class="empty-tip">
+    <div v-else-if="hasSearched && !isLoading" class="empty-tip">
       还没有该岗位的学习路线，试试“Java后端”或“前端开发”吧！
     </div>
   </div>
@@ -52,101 +66,77 @@ const learningPath = ref([])
 // 是否已经进行过搜索
 const hasSearched = ref(false)
 
-/**
- * 模拟路线库
- * 每个路线对象包含：
- * - keyword: 匹配关键词（岗位名称的一部分），用于筛选
- * - stages: 学习阶段数组
- *   每个阶段对象包含 title（阶段标题）和 tips（学习建议数组）
- */
-const routeLibrary = [
-  {
-    keyword: 'Java后端',
-    stages: [
-      {
-        title: '基础入门',
-        tips: [
-          '学习 Java 基础语法、面向对象编程思想',
-          '掌握常用工具类库（集合、IO、多线程）',
-          '了解 MySQL 基本操作与 SQL 语句'
-        ]
-      },
-      {
-        title: 'Web 开发基础',
-        tips: [
-          '学习 Servlet、JSP，理解 HTTP 协议',
-          '掌握 Spring 框架核心（IoC、AOP）',
-          '学习 Spring MVC 与 RESTful API 设计'
-        ]
-      },
-      {
-        title: '进阶实战',
-        tips: [
-          '搭建 Spring Boot 项目，整合 MyBatis/MyBatis-Plus',
-          '学习 Redis 缓存、消息队列（RabbitMQ/Kafka）',
-          '掌握微服务基础（Spring Cloud 或 Dubbo）'
-        ]
-      }
-    ]
-  },
-  {
-    keyword: '前端开发',
-    stages: [
-      {
-        title: '基础三件套',
-        tips: [
-          '熟练掌握 HTML5、CSS3 页面布局与响应式设计',
-          '深入学习 JavaScript ES6+ 语法，理解异步编程',
-          '熟悉浏览器开发者工具的使用'
-        ]
-      },
-      {
-        title: '框架与工具',
-        tips: [
-          '学习 Vue 或 React 框架核心概念，完成一个单页应用',
-          '掌握前端构建工具（Vite / Webpack）',
-          '学习 npm/yarn 包管理，了解模块化开发'
-        ]
-      },
-      {
-        title: '工程化与进阶',
-        tips: [
-          '学习 TypeScript，为项目添加类型约束',
-          '了解前端测试（Jest / Cypress）与 CI/CD 流程',
-          '尝试 Next.js / Nuxt.js 等服务端渲染框架'
-        ]
-      }
-    ]
-  }
-]
-
-/**
- * 生成学习路线
- */
-const generatePath = () => {
+const isLoading = ref(false)
+const errorMessage = ref('')
+const generatePath = async () => {
   const keyword = jobInput.value.trim()
-  hasSearched.value = true
-
   if (!keyword) {
-    learningPath.value = []
+    errorMessage.value = '目标岗位这里填哦'
     return
   }
 
-  // 在路线库中寻找匹配项（岗位关键词包含用户输入，或用户输入包含关键词）
-  const matched = routeLibrary.find(item =>
-    item.keyword.toLowerCase().includes(keyword.toLowerCase()) ||
-    keyword.toLowerCase().includes(item.keyword.toLowerCase())
-  )
+  // 重置状态
+  errorMessage.value = ''
+  hasSearched.value = true
+  isLoading.value = true
+  learningPath.value = []
 
-  if (matched) {
-    learningPath.value = matched.stages
-  } else {
+  try {
+    const response = await fetch('/api/learning-path', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ targetJob: keyword })
+    })
+
+    const result = await response.json()
+
+    if (!response.ok || !result.success) {
+      throw new Error(result.message || '请求失败')
+    }
+
+    // 接收 { weeks: [...] } 结构
+    learningPath.value = result.data.weeks || []
+
+  } catch (err) {
+    console.error('学习路线生成失败:', err)
+    errorMessage.value = err.message || '网络错误，请稍后重试'
     learningPath.value = []
+  } finally {
+    isLoading.value = false
   }
 }
 </script>
 
 <style scoped>
+.error-message {
+  background: #fef2f2;
+  color: #b91c1c;
+  padding: 12px 16px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 14px;
+}
+
+.retry-btn {
+  background: none;
+  border: none;
+  color: #b91c1c;
+  text-decoration: underline;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.generate-btn:disabled {
+  background: #94a3b8;
+  cursor: not-allowed;
+  transform: none;
+}
+
 .learning-container {
   max-width: 800px;
   margin: 40px auto;
@@ -281,5 +271,12 @@ const generatePath = () => {
   color: #94a3b8;
   font-size: 15px;
   padding: 40px 0;
+}
+
+.ai-disclaimer {
+  text-align: center;
+  color: #94a3b8;
+  font-size: 13px;
+  margin-top: 16px;
 }
 </style>
